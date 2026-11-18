@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">FaunaGBIF</string>
+    <string name="app_subtitle">Biología de Campo · GBIF &amp; UICN</string>
+    <string name="pick_gallery_button">Galería de fotos</string>
+    <string name="pick_file_button">Subir archivo</string>
+    <string name="analyze_button">Identificar y generar ficha</string>
+    <string name="export_pdf_button">Descargar PDF</string>
+    <string name="save_as_pdf_button">Guardar en…</string>
+    <string name="share_pdf_button">Compartir PDF</string>
+    <string name="open_pdf_button">Abrir PDF</string>
+    <string name="edit_field_data_button">Completar datos de campo</string>
+    <string name="history_title">Registros recientes</string>
+    <string name="empty_state_title">Identifica Flora o Fauna al instante</string>
+    <string name="empty_state_desc">Carga una fotografía desde tu galería o archivos. El sistema determinará automáticamente el reino (Plantae o Animalia), consultará la taxonomía oficial en GBIF y generará la ficha técnica lista para descargar en PDF.</string>
+</resources>

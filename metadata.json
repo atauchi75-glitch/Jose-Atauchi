@@ -1,0 +1,6 @@
+{
+  "name": "FaunaGBIF",
+  "description": "Identificador zoológico de especies con la base de datos GBIF, análisis visual con IA y exportación directa de fichas técnicas en PDF.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
