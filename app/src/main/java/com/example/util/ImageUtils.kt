@@ -1,5 +1,6 @@
 package com.example.util
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -9,6 +10,7 @@ import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import androidx.core.graphics.scale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -37,25 +39,25 @@ object ImageUtils {
         val mimeType = context.contentResolver.getType(sourceUri) ?: "image/jpeg"
 
         val rawBitmap = decodeScaledBitmap(context, sourceUri)
-        val scaled = scaleDownIfNeeded(rawBitmap, MAX_DIMENSION)
+        val normalized = ensureSoftwareArgb8888(scaleDownIfNeeded(rawBitmap, MAX_DIMENSION))
 
         val dir = File(context.filesDir, "specimens").apply { mkdirs() }
         val file = File(dir, "specimen_${UUID.randomUUID()}.jpg")
         FileOutputStream(file).use { out ->
-            scaled.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            normalized.compress(Bitmap.CompressFormat.JPEG, 90, out)
         }
 
         val finalName = queriedName.ifBlank { "imagen_espécimen.jpg" }
         val finalSize = if (queriedSize > 0L) queriedSize else file.length()
 
         LoadedImageFile(
-            bitmap = scaled,
+            bitmap = normalized,
             localPath = file.absolutePath,
             displayName = finalName,
             mimeType = mimeType,
             fileSizeBytes = finalSize,
-            widthPx = scaled.width,
-            heightPx = scaled.height
+            widthPx = normalized.width,
+            heightPx = normalized.height
         )
     }
 
@@ -67,11 +69,22 @@ object ImageUtils {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, bounds)
             val sampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, maxDimension)
-            val opts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
             BitmapFactory.decodeFile(file.absolutePath, opts)?.let {
-                scaleDownIfNeeded(it, maxDimension)
+                ensureSoftwareArgb8888(scaleDownIfNeeded(it, maxDimension))
             }
         }
+
+    fun ensureSoftwareArgb8888(bitmap: Bitmap): Bitmap {
+        return if (bitmap.config == Bitmap.Config.ARGB_8888) {
+            bitmap
+        } else {
+            bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        }
+    }
 
     fun formatFileSize(bytes: Long): String {
         if (bytes <= 0L) return "Tamaño N/D"
@@ -118,6 +131,7 @@ object ImageUtils {
         return displayName to size
     }
 
+    @SuppressLint("ExifInterface")
     private fun decodeScaledBitmap(context: Context, uri: Uri): Bitmap {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
@@ -140,7 +154,10 @@ object ImageUtils {
             BitmapFactory.decodeStream(stream, null, bounds)
         }
         val sampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, MAX_DIMENSION)
-        val opts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
         val decoded = resolver.openInputStream(uri)?.use { stream ->
             BitmapFactory.decodeStream(stream, null, opts)
         } ?: throw IllegalStateException("No se pudo leer la imagen seleccionada.")
@@ -175,7 +192,7 @@ object ImageUtils {
         val ratio = maxDim.toFloat() / maxSide.toFloat()
         val w = (bitmap.width * ratio).toInt().coerceAtLeast(1)
         val h = (bitmap.height * ratio).toInt().coerceAtLeast(1)
-        return Bitmap.createScaledBitmap(bitmap, w, h, true)
+        return bitmap.scale(w, h)
     }
 
     private fun calculateInSampleSize(width: Int, height: Int, reqMax: Int): Int {

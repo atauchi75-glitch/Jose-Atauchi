@@ -25,7 +25,7 @@ class GbifRepository(
         scientificName: String,
         kingdomType: KingdomType
     ): GbifTaxonVerification = withContext(Dispatchers.IO) {
-        val cleanName = scientificName.trim()
+        val cleanName = cleanScientificNameForMatch(scientificName)
         if (cleanName.isBlank()) {
             return@withContext GbifTaxonVerification(isVerifiedInGbif = false)
         }
@@ -36,18 +36,28 @@ class GbifRepository(
         }
 
         try {
-            val matchResp = api.matchSpecies(
+            var matchResp = api.matchSpecies(
                 name = cleanName,
                 kingdom = expectedKingdom,
                 strict = false
             )
-            val match = if (matchResp.isSuccessful) matchResp.body() else null
-            val usageKey = match?.usageKey
+            var match = if (matchResp.isSuccessful) matchResp.body() else null
 
+            // Fallback without strict kingdom filter (e.g. fungi/lichens grouped under Flora)
+            if (match?.usageKey == null || match.matchType == "NONE") {
+                matchResp = api.matchSpecies(
+                    name = cleanName,
+                    kingdom = null,
+                    strict = false
+                )
+                match = if (matchResp.isSuccessful) matchResp.body() else null
+            }
+
+            val usageKey = match?.usageKey
             if (usageKey == null || match.matchType == "NONE") {
                 return@withContext GbifTaxonVerification(
                     canonicalName = cleanName,
-                    scientificName = cleanName,
+                    scientificName = scientificName.trim(),
                     isVerifiedInGbif = false
                 )
             }
@@ -115,13 +125,26 @@ class GbifRepository(
             Log.w(TAG, "GBIF lookup failed for $cleanName: ${e.localizedMessage}")
             GbifTaxonVerification(
                 canonicalName = cleanName,
-                scientificName = cleanName,
+                scientificName = scientificName.trim(),
                 isVerifiedInGbif = false
             )
         }
     }
 
     companion object {
+        internal fun cleanScientificNameForMatch(raw: String): String {
+            val withoutParens = raw.replace(Regex("\\([^)]*\\)"), " ")
+            val tokens = withoutParens
+                .replace("*", "")
+                .trim()
+                .split(Regex("\\s+"))
+                .filter { token ->
+                    val low = token.lowercase()
+                    low.isNotBlank() && low !in setOf("sp.", "spp.", "cf.", "aff.", "subsp.", "var.")
+                }
+            return tokens.take(2).joinToString(" ").trim()
+        }
+
         fun createDefaultApi(): GbifApiService {
             val logging = HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BASIC

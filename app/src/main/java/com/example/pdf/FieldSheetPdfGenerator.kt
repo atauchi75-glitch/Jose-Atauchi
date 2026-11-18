@@ -18,6 +18,8 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withTranslation
 import com.example.model.FaunaDetails
 import com.example.model.FloraDetails
 import com.example.model.KingdomType
@@ -37,6 +39,7 @@ import java.util.Locale
 data class PdfExportResult(
     val fileName: String,
     val contentUri: Uri,
+    val cacheFile: File,
     val cacheShareUri: Uri,
     val savedLocationLabel: String
 )
@@ -89,7 +92,7 @@ object FieldSheetPdfGenerator {
         record: ObservationRecord,
         targetUri: Uri
     ): PdfExportResult = withContext(Dispatchers.IO) {
-        val (_, shareUri) = exportToCache(context, record)
+        val (cacheFile, shareUri) = exportToCache(context, record)
         val doc = buildDocument(record)
         try {
             context.contentResolver.openOutputStream(targetUri)?.use { out ->
@@ -101,6 +104,7 @@ object FieldSheetPdfGenerator {
         PdfExportResult(
             fileName = buildFileName(record),
             contentUri = targetUri,
+            cacheFile = cacheFile,
             cacheShareUri = shareUri,
             savedLocationLabel = "Ubicación seleccionada por el usuario"
         )
@@ -112,22 +116,18 @@ object FieldSheetPdfGenerator {
         record: ObservationRecord
     ): PdfExportResult = withContext(Dispatchers.IO) {
         val fileName = buildFileName(record)
-        val (_, shareUri) = exportToCache(context, record)
+        val (cacheFile, shareUri) = exportToCache(context, record)
         val resolver = context.contentResolver
-
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-            put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
-            put(
-                MediaStore.Downloads.RELATIVE_PATH,
-                "${Environment.DIRECTORY_DOWNLOADS}/FaunaGBIF"
-            )
-            put(MediaStore.Downloads.IS_PENDING, 1)
-        }
-
         val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val itemUri = resolver.insert(collection, values)
-            ?: throw IllegalStateException("No se pudo crear el PDF en Descargas.")
+
+        var relativePath = "${Environment.DIRECTORY_DOWNLOADS}/FaunaGBIF"
+        var itemUri = insertDownloadEntry(resolver, collection, fileName, relativePath)
+        if (itemUri == null) {
+            // Fallback to root Downloads if OEM restricts nested subfolder
+            relativePath = Environment.DIRECTORY_DOWNLOADS
+            itemUri = insertDownloadEntry(resolver, collection, fileName, relativePath)
+                ?: throw IllegalStateException("No se pudo crear el archivo PDF en Descargas.")
+        }
 
         try {
             val doc = buildDocument(record)
@@ -139,24 +139,46 @@ object FieldSheetPdfGenerator {
                 doc.close()
             }
 
-            values.clear()
-            values.put(MediaStore.Downloads.IS_PENDING, 0)
-            resolver.update(itemUri, values, null, null)
+            val doneValues = ContentValues().apply {
+                put(MediaStore.Downloads.IS_PENDING, 0)
+            }
+            resolver.update(itemUri, doneValues, null, null)
         } catch (e: Exception) {
             runCatching { resolver.delete(itemUri, null, null) }
             throw e
         }
 
+        val labelFolder = if (relativePath.endsWith("FaunaGBIF")) "Descargas/FaunaGBIF" else "Descargas"
         PdfExportResult(
             fileName = fileName,
             contentUri = itemUri,
+            cacheFile = cacheFile,
             cacheShareUri = shareUri,
-            savedLocationLabel = "Descargas/FaunaGBIF/$fileName"
+            savedLocationLabel = "$labelFolder/$fileName"
         )
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun insertDownloadEntry(
+        resolver: android.content.ContentResolver,
+        collection: Uri,
+        fileName: String,
+        relativePath: String
+    ): Uri? {
+        return runCatching {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+                put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            resolver.insert(collection, values)
+        }.getOrNull()
     }
 
     private suspend fun buildDocument(record: ObservationRecord): PdfDocument {
         val specimenBitmap = ImageUtils.loadBitmapFromFile(record.imageLocalPath, maxDimension = 720)
+            ?.let { ImageUtils.ensureSoftwareArgb8888(it) }
         val doc = PdfDocument()
         try {
             val writer = PdfPageWriter(doc, record)
@@ -178,20 +200,20 @@ object FieldSheetPdfGenerator {
         private var y = TOP_MARGIN
 
         private val isFlora = record.kingdom == KingdomType.FLORA
-        private val accentColor = if (isFlora) Color.parseColor("#133A2A") else Color.parseColor("#1B4353")
-        private val accentSoft = if (isFlora) Color.parseColor("#EAF4EE") else Color.parseColor("#E8F2F6")
-        private val badgeSecondary = if (isFlora) Color.parseColor("#2E6F4E") else Color.parseColor("#B85D34")
+        private val accentColor = if (isFlora) "#133A2A".toColorInt() else "#1B4353".toColorInt()
+        private val accentSoft = if (isFlora) "#EAF4EE".toColorInt() else "#E8F2F6".toColorInt()
+        private val badgeSecondary = if (isFlora) "#2E6F4E".toColorInt() else "#B85D34".toColorInt()
 
         private val bgPaint = Paint().apply { color = Color.WHITE; style = Paint.Style.FILL }
         private val headerPaint = Paint().apply { color = accentColor; style = Paint.Style.FILL }
         private val cardFillPaint = Paint().apply { color = accentSoft; style = Paint.Style.FILL }
         private val cardStrokePaint = Paint().apply {
-            color = Color.parseColor("#CFD8D3")
+            color = "#CFD8D3".toColorInt()
             style = Paint.Style.STROKE
             strokeWidth = 0.8f
         }
         private val dividerPaint = Paint().apply {
-            color = Color.parseColor("#DCE3DF")
+            color = "#DCE3DF".toColorInt()
             strokeWidth = 0.8f
         }
         private val checkFillPaint = Paint().apply {
@@ -200,7 +222,7 @@ object FieldSheetPdfGenerator {
             isAntiAlias = true
         }
         private val checkStrokePaint = Paint().apply {
-            color = Color.parseColor("#6D7B73")
+            color = "#6D7B73".toColorInt()
             style = Paint.Style.STROKE
             strokeWidth = 1.0f
             isAntiAlias = true
@@ -220,12 +242,12 @@ object FieldSheetPdfGenerator {
             typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
         }
         private val subtitlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#DCEAE2")
+            color = "#DCEAE2".toColorInt()
             textSize = 9.2f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
         }
         private val codeLinePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#F5E7B8")
+            color = "#F5E7B8".toColorInt()
             textSize = 9.2f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
@@ -235,12 +257,12 @@ object FieldSheetPdfGenerator {
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
         private val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#1B2620")
+            color = "#1B2620".toColorInt()
             textSize = 9.4f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
         private val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#2A352F")
+            color = "#2A352F".toColorInt()
             textSize = 9.4f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
         }
@@ -250,12 +272,12 @@ object FieldSheetPdfGenerator {
             typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD_ITALIC)
         }
         private val commonTitlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#16201B")
+            color = "#16201B".toColorInt()
             textSize = 12.5f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
         private val footerPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#6B7770")
+            color = "#6B7770".toColorInt()
             textSize = 8f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
         }
@@ -270,9 +292,7 @@ object FieldSheetPdfGenerator {
                 KingdomType.FAUNA -> record.fauna?.let { renderFaunaSections(it) }
             }
 
-            // Finish last page and stamp footers on all pages
             finishCurrentPage()
-            stampPageNumbers()
         }
 
         private fun startNewPage(firstPage: Boolean) {
@@ -406,7 +426,7 @@ object FieldSheetPdfGenerator {
 
             val gbifLine = if (record.gbif.isVerifiedInGbif && record.gbif.usageKey != null) {
                 val countFormatted = record.gbif.occurrenceCount?.let {
-                    NumberFormat.getIntegerInstance(Locale("es")).format(it)
+                    NumberFormat.getIntegerInstance(Locale.forLanguageTag("es")).format(it)
                 } ?: "N/D"
                 "GBIF Verificado · ID #${record.gbif.usageKey} · $countFormatted registros globales"
             } else {
@@ -435,10 +455,9 @@ object FieldSheetPdfGenerator {
             ensureSpace(boxH + 8f)
             val rect = RectF(MARGIN_H, y, PAGE_WIDTH - MARGIN_H, y + boxH)
             canvas.drawRoundRect(rect, 5f, 5f, cardStrokePaint)
-            canvas.save()
-            canvas.translate(MARGIN_H + 8f, y + 7f)
-            layout.draw(canvas)
-            canvas.restore()
+            canvas.withTranslation(MARGIN_H + 8f, y + 7f) {
+                layout.draw(this)
+            }
             y += boxH + 10f
         }
 
@@ -655,12 +674,11 @@ object FieldSheetPdfGenerator {
             val blockHeight = labelLayout.height + valLayout.height + 5f
             ensureSpace(blockHeight)
 
-            canvas.save()
-            canvas.translate(MARGIN_H, y)
-            labelLayout.draw(canvas)
-            canvas.translate(8f, labelLayout.height + 1f)
-            valLayout.draw(canvas)
-            canvas.restore()
+            canvas.withTranslation(MARGIN_H, y) {
+                labelLayout.draw(this)
+                translate(8f, labelLayout.height + 1f)
+                valLayout.draw(this)
+            }
 
             y += blockHeight
         }
@@ -699,10 +717,9 @@ object FieldSheetPdfGenerator {
             y += rows * rowHeight + 2f
 
             if (noteLayout != null) {
-                canvas.save()
-                canvas.translate(MARGIN_H + 8f, y)
-                noteLayout.draw(canvas)
-                canvas.restore()
+                canvas.withTranslation(MARGIN_H + 8f, y) {
+                    noteLayout.draw(this)
+                }
                 y += noteLayout.height + 4f
             }
             y += 3f
@@ -747,10 +764,9 @@ object FieldSheetPdfGenerator {
             paint: TextPaint
         ): Int {
             val layout = buildStaticLayout(text, width, paint)
-            canvas.save()
-            canvas.translate(x, yTop)
-            layout.draw(canvas)
-            canvas.restore()
+            canvas.withTranslation(x, yTop) {
+                layout.draw(this)
+            }
             return layout.height
         }
 
@@ -768,19 +784,13 @@ object FieldSheetPdfGenerator {
                 .build()
         }
 
-        private fun stampPageNumbers() {
-            // Page footers are drawn live per page below if needed; PdfDocument finalizes on finishPage.
-            // Note: Since finishPage already closed each page canvas, let's keep a clean static footer
-            // rendered when starting/finishing each page! Let's actually draw footer before finishPage:
-        }
-
         private fun iucnColorInt(code: String): Int = when (code) {
-            "LC" -> Color.parseColor("#2E7D32")
-            "NT" -> Color.parseColor("#689F38")
-            "VU" -> Color.parseColor("#B58100")
-            "EN" -> Color.parseColor("#E65100")
-            "CR" -> Color.parseColor("#C62828")
-            else -> Color.parseColor("#546E7A")
+            "LC" -> "#2E7D32".toColorInt()
+            "NT" -> "#689F38".toColorInt()
+            "VU" -> "#B58100".toColorInt()
+            "EN" -> "#E65100".toColorInt()
+            "CR" -> "#C62828".toColorInt()
+            else -> "#546E7A".toColorInt()
         }
 
         private fun iucnLabelEs(code: String): String = when (code) {

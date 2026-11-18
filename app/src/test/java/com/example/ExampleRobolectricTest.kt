@@ -47,6 +47,22 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `gbif binomial cleaner strips authorships and taxonomic qualifiers`() {
+        assertEquals(
+            "Panthera onca",
+            com.example.data.gbif.GbifRepository.cleanScientificNameForMatch("Panthera onca (Linnaeus, 1758)")
+        )
+        assertEquals(
+            "Monstera deliciosa",
+            com.example.data.gbif.GbifRepository.cleanScientificNameForMatch("*Monstera deliciosa* Liebm.")
+        )
+        assertEquals(
+            "Quercus",
+            com.example.data.gbif.GbifRepository.cleanScientificNameForMatch("Quercus sp.")
+        )
+    }
+
+    @Test
     fun `buildFileName formats Flora and Fauna PDF names cleanly`() {
         val floraRecord = ObservationRecord(
             id = "flora-1",

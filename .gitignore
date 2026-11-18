@@ -13,6 +13,13 @@
 /captures
 .externalNativeBuild
 .cxx
+.build-outputs/
 local.properties
 .env
+
+# Signing & Secrets (protect keys when publishing to GitHub)
+*.keystore
+*.jks
 debug.keystore
+app/google-services.json
+app/src/main/res/values/firebase_applet_config.xml

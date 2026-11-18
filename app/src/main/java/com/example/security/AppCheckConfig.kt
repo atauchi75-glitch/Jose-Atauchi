@@ -1,8 +1,10 @@
 package com.example.security
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.core.content.edit
 import com.example.BuildConfig
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
@@ -16,6 +18,7 @@ private const val DEBUG_STORE_PREFIX = "com.google.firebase.appcheck.debug.store
 private const val DEBUG_SECRET_KEY = "com.google.firebase.appcheck.debug.DEBUG_SECRET"
 private const val RECAPTCHA_SITE_KEY_RES = "recaptcha_site_key"
 
+@SuppressLint("DiscouragedApi")
 fun configureAppCheck(context: Context, intent: Intent?) {
     try {
         if (FirebaseApp.getApps(context).isEmpty()) {
@@ -31,10 +34,10 @@ fun configureAppCheck(context: Context, intent: Intent?) {
                     "$DEBUG_STORE_PREFIX$persistenceKey",
                     Context.MODE_PRIVATE
                 )
-                // Synchronous commit() ensures the secret is written before DebugAppCheckProviderFactory reads it.
-                prefs.edit()
-                    .putString(DEBUG_SECRET_KEY, debugToken)
-                    .commit()
+                // Synchronous commit = true ensures secret is persisted before DebugAppCheckProviderFactory reads it.
+                prefs.edit(commit = true) {
+                    putString(DEBUG_SECRET_KEY, debugToken)
+                }
                 Log.d(TAG, "App Check debug secret configured successfully.")
             } else {
                 Log.w(TAG, "No debug token found in Intent extra.")
@@ -52,13 +55,13 @@ fun configureAppCheck(context: Context, intent: Intent?) {
             )
             if (resId != 0) {
                 val siteKey = context.getString(resId)
-                if (siteKey.isNotBlank()) {
+                if (siteKey.isNotBlank() && !siteKey.startsWith("REPLACE_WITH")) {
                     FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
                         RecaptchaAppCheckProviderFactory.getInstance(siteKey)
                     )
                     Log.d(TAG, "RecaptchaAppCheckProviderFactory installed.")
                 } else {
-                    Log.e(TAG, "recaptcha_site_key resource string is blank.")
+                    Log.e(TAG, "recaptcha_site_key resource string is blank or placeholder.")
                 }
             } else {
                 Log.e(TAG, "recaptcha_site_key string resource not found in package.")

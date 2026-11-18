@@ -144,7 +144,7 @@ fun GbifVerificationCard(
                         )
                         val sub = if (gbif.isVerifiedInGbif && gbif.usageKey != null) {
                             val occ = gbif.occurrenceCount?.let {
-                                NumberFormat.getIntegerInstance(Locale("es")).format(it)
+                                NumberFormat.getIntegerInstance(Locale.forLanguageTag("es")).format(it)
                             } ?: "N/D"
                             "ID #${gbif.usageKey} · $occ registros globales"
                         } else {
